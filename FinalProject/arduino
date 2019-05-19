@@ -1,0 +1,191 @@
+/*
+
+  WiFi UDP device responding to buttons on a web page
+  sent from a web page to node.js client to node.js server
+  and finally to here
+
+  code is at:
+  https://github.com/michaelshiloh/resourcesForClasses/tree/master/src/nodePrograms/udpAndHttpServer
+
+  created 3 February 2019
+  by Michael Shiloh
+
+  Change log:
+  14 Mar 2019 - ms -  better comments and cleaned up code
+                      Send binary data between Arduino and server
+*/
+
+#include <WiFiNINA.h>
+#include <WiFiUdp.h>
+
+int status = WL_IDLE_STATUS;
+#include "arduino_secrets.h"
+///////please enter your sensitive data in the Secret tab/arduino_secrets.h
+char ssid[] = SECRET_SSID;        // your network SSID (name)
+char pass[] = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
+int keyIndex = 0;            // your network key Index number (needed only for WEP)
+
+unsigned int myPort = 5000;      // local port to listen on
+unsigned int remoteServerPort = 7000;  // remote port to talk to
+// IPAddress remoteServerAddress(192, 168, 1, 5); // server at home
+IPAddress remoteServerAddress(10, 225, 161, 133); // server on x1 laptop
+
+char packetBuffer[255]; //buffer to hold incoming packet
+
+WiFiUDP Udp;
+
+// Sensors
+const int SNAP_BUTTON_PIN = 1;
+const int FILTER_INDICATOR_POT_PIN = A2;
+const int FILTER_INTENSITY_POT_PIN = A5;
+
+
+// Actuators
+const int NUMBER_OF_ACTUATORS = 3;
+int actuators[NUMBER_OF_ACTUATORS] = {
+  3, // pin numbers
+  4,
+  5
+};
+
+// remember the button state so we only send
+// when the state changes
+boolean buttonState;
+boolean lastButtonState = 0; // arbitrary
+int filterIntensity;
+int filterIndicator = 0;
+int lastFilterIntensity;
+int lastFilterIndicator=0;
+
+
+void setup() {
+
+  // Set all actuator pins as outputs
+  for (int i = 0; i < NUMBER_OF_ACTUATORS; i++ ) {
+    pinMode(actuators[i], OUTPUT);
+  }
+
+  //Initialize serial
+  Serial.begin(9600);
+  // wait for serial port to connect. Needed for native USB port only
+  // Remove this if running without a serial monitor
+  while (!Serial) {
+    ;
+  }
+
+  // attempt to connect to WiFi network:
+  while ( status != WL_CONNECTED) {
+    Serial.print("Attempting to connect to SSID: ");
+    Serial.println(ssid);
+    // Connect to WPA/WPA2 network. Change this line if using open or WEP network:
+    status = WiFi.begin(ssid, pass);
+
+    // wait 10 seconds for connection:
+    delay(10000);
+  }
+  Serial.println("Connected to wifi");
+  printWiFiStatus();
+
+  Serial.print("Initializing WiFiUDP library and listening on port ");
+  Serial.println(myPort);
+  Udp.begin(myPort);
+}
+
+void loop() {
+
+  buttonState = digitalRead(SNAP_BUTTON_PIN);
+  filterIndicator = analogRead(FILTER_INDICATOR_POT_PIN);
+  filterIntensity = analogRead(FILTER_INTENSITY_POT_PIN);
+  
+  filterIndicator = map(filterIndicator, 0, 1023, 0, 1199);
+  filterIntensity = map(filterIntensity, 0, 1023, 0, 2400);
+
+  if(filterIndicator >= 0 && filterIndicator < 400) {
+    filterIndicator = 0;
+  } else if(filterIndicator >= 400 && filterIndicator < 800) {
+    filterIndicator = 1;
+  } else if(filterIndicator >= 800 && filterIndicator < 1200) {
+    filterIndicator = 2;
+  }
+
+  if(filterIntensity >= 0 && filterIntensity < 400) {
+    filterIntensity = 1;
+  } else if(filterIntensity >= 400 && filterIntensity < 800) {
+    filterIntensity = 2;
+  } else if(filterIntensity >= 800 && filterIntensity < 1200) {
+    filterIntensity = 3;
+  } else if(filterIntensity >= 1200 && filterIntensity < 1600) {
+    filterIntensity = 4;
+  } else if(filterIntensity >= 1600 && filterIntensity < 2000) {
+      filterIntensity = 5;
+  } else if (filterIntensity >= 2000) {
+    filterIntensity = 6;
+  }
+
+  if ( ( (buttonState != lastButtonState) && (buttonState == 1) ) || filterIndicator != lastFilterIndicator || filterIntensity != lastFilterIntensity) {
+    int butState = 999, fInd = 999, fInt = 999;
+    if(buttonState == 1) {
+      butState = buttonState;
+      Serial.print("button state changed; sending new state: ");
+      Serial.println(butState);
+    }
+    if(filterIndicator != lastFilterIndicator) {
+      fInd = filterIndicator;
+      Serial.print("Change the filter: sending: ");
+      Serial.println(fInd);
+    }
+    if(filterIntensity != lastFilterIntensity) {
+      fInt = filterIntensity;
+      Serial.print("Change the current filter's intensity level: sending: ");
+      Serial.println(fInt);
+    }
+    Udp.beginPacket(remoteServerAddress, remoteServerPort);
+    Udp.write(butState);
+    Udp.write(fInd);
+    Udp.write(fInt);
+    Udp.endPacket();
+  }
+
+  lastButtonState = buttonState;
+  lastFilterIntensity = filterIntensity;
+  lastFilterIndicator = filterIndicator;
+}
+
+void printWiFiStatus() {
+  // print the SSID of the network you're attached to:
+  Serial.print("SSID: ");
+  Serial.println(WiFi.SSID());
+
+  // print your WiFi shield's IP address:
+  IPAddress ip = WiFi.localIP();
+  Serial.print("My IP Address: ");
+  Serial.println(ip);
+
+  // print the received signal strength:
+  long rssi = WiFi.RSSI();
+  Serial.print("signal strength (RSSI):");
+  Serial.print(rssi);
+  Serial.println(" dBm");
+}
+
+// It's polite to listen first
+  // Did the server send us anything?
+//  int packetSize = Udp.parsePacket();
+//  if (packetSize)
+//  {
+//    Serial.print("Received packet of size ");
+//    Serial.print(packetSize);
+//    Serial.print(" from address ");
+//    IPAddress remoteIp = Udp.remoteIP();
+//    Serial.print(remoteIp);
+//    Serial.print(", port ");
+//    Serial.println(Udp.remotePort());
+//
+//    // read the packet into packetBufffer
+//    int len = Udp.read(packetBuffer, 255);
+//
+//    // Activate the actuators as requested
+//    digitalWrite(
+//      actuators[(int)packetBuffer[0]],  // first byte is actuator number
+//      (int)packetBuffer[1]);            // second byte is value
+//  }
